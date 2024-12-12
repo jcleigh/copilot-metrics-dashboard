@@ -8,9 +8,8 @@ import {
   CopilotSeatsData,
   CopilotSeatManagementData,
 } from "@/features/common/models";
-import { cosmosClient } from "./cosmos-db-service";
+import { dynamoClient } from "./dynamodb-service";
 import { format } from "date-fns";
-import { SqlQuerySpec } from "@azure/cosmos";
 import { stringIsNullOrEmpty } from "../utils/helpers";
 
 export interface IFilter {
@@ -53,9 +52,8 @@ export const getCopilotSeats = async (
 const getCopilotSeatsFromDatabase = async (
   filter: IFilter
 ): Promise<ServerActionResponse<CopilotSeatsData>> => {
-  const client = cosmosClient();
-  const database = client.database("platform-engineering");
-  const container = database.container("seats_history");
+  const client = dynamoClient();
+  const tableName = "platform-engineering-seats-history";
 
   let date = "";
   const maxDays = 365 * 2; // maximum 2 years of data
@@ -67,34 +65,34 @@ const getCopilotSeatsFromDatabase = async (
     date = format(today, "yyyy-MM-dd");
   }
 
-  let querySpec: SqlQuerySpec = {
-    query: `SELECT * FROM c WHERE c.date = @date`,
-    parameters: [{ name: "@date", value: date }],
+  let params = {
+    TableName: tableName,
+    FilterExpression: "#date = :date",
+    ExpressionAttributeNames: {
+      "#date": "date",
+    },
+    ExpressionAttributeValues: {
+      ":date": date,
+    },
   };
   if (filter.enterprise) {
-    querySpec.query += ` AND c.enterprise = @enterprise`;
-    querySpec.parameters?.push({
-      name: "@enterprise",
-      value: filter.enterprise,
-    });
+    params.FilterExpression += ` AND #enterprise = :enterprise`;
+    params.ExpressionAttributeNames["#enterprise"] = "enterprise";
+    params.ExpressionAttributeValues[":enterprise"] = filter.enterprise;
   }
   if (filter.organization) {
-    querySpec.query += ` AND c.organization = @organization`;
-    querySpec.parameters?.push({
-      name: "@organization",
-      value: filter.organization,
-    });
+    params.FilterExpression += ` AND #organization = :organization`;
+    params.ExpressionAttributeNames["#organization"] = "organization";
+    params.ExpressionAttributeValues[":organization"] = filter.organization;
   }
   if (filter.team) {
-    querySpec.query += ` AND c.team = @team`;
-    querySpec.parameters?.push({ name: "@team", value: filter.team });
+    params.FilterExpression += ` AND #team = :team`;
+    params.ExpressionAttributeNames["#team"] = "team";
+    params.ExpressionAttributeValues[":team"] = filter.team;
   }
 
-  const { resources } = await container.items
-    .query<CopilotSeatsData>(querySpec, {
-      maxItemCount: maxDays,
-    })
-    .fetchAll();
+  const data = await client.scan(params).promise();
+  const resources = data.Items as CopilotSeatsData[];
 
   return {
     status: "OK",

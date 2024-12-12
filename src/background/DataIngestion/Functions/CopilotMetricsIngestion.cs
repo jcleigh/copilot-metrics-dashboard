@@ -1,4 +1,5 @@
-﻿using Microsoft.Azure.Functions.Worker;
+using Amazon.Lambda.Core;
+using Amazon.Lambda.DynamoDBEvents;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.CopilotDashboard.DataIngestion.Models;
@@ -22,12 +23,10 @@ public class CopilotMetricsIngestion
         _options = options;
     }
 
-
-    [Function("GitHubCopilotMetricsIngestion")]
-    [CosmosDBOutput(databaseName: "platform-engineering", containerName: "metrics_history", Connection = "AZURE_COSMOSDB_ENDPOINT", CreateIfNotExists = true)]
-    public async Task<List<Metrics>> Run([TimerTrigger("0 0 * * * *")] TimerInfo myTimer)
+    [LambdaFunction]
+    public async Task<List<Metrics>> Run(DynamoDBEvent dynamoEvent)
     {
-        _logger.LogInformation($"GitHubCopilotMetricsIngestion timer trigger function executed at: {DateTime.Now}");
+        _logger.LogInformation($"GitHubCopilotMetricsIngestion DynamoDB event function executed at: {DateTime.Now}");
         bool.TryParse(Environment.GetEnvironmentVariable("USE_METRICS_API"), out var useMetricsApi);
         _logger.LogInformation($"USE_METRICS_API: {useMetricsApi}");
         if (!useMetricsApi) return [];
@@ -49,10 +48,7 @@ public class CopilotMetricsIngestion
             metrics.AddRange(await ExtractMetrics());
         }
 
-        if (myTimer.ScheduleStatus is not null)
-        {
-            _logger.LogInformation($"Finished ingestion. Next timer schedule at: {myTimer.ScheduleStatus.Next}");
-        }
+        _logger.LogInformation($"Finished ingestion. DynamoDB event processed at: {DateTime.Now}");
         _logger.LogInformation($"Metrics count: {metrics.Count}");
         return metrics;
     }
