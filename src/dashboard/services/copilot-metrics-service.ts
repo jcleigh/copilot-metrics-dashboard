@@ -3,9 +3,8 @@ import {
   unknownResponseError,
 } from "@/features/common/response-error";
 import { ServerActionResponse } from "@/features/common/server-action-response";
-import { SqlQuerySpec } from "@azure/cosmos";
 import { format } from "date-fns";
-import { cosmosClient, cosmosConfiguration } from "./cosmos-db-service";
+import { dynamoClient, dynamoConfiguration } from "./dynamodb-service";
 import { ensureGitHubEnvConfig } from "./env-service";
 import { applyTimeFrameLabel } from "./helper";
 import { sampleData } from "./sample-data";
@@ -48,12 +47,12 @@ export const getCopilotMetrics = async (
   filter: IFilter
 ): Promise<ServerActionResponse<CopilotUsageOutput[]>> => {
   try {
-    const isCosmosConfig = cosmosConfiguration();
+    const isDynamoConfig = dynamoConfiguration();
     switch(process.env.GITHUB_API_SCOPE) {
       // If we have the required environment variables, we can use the enterprise API endpoint
       case "enterprise":
         // If we have the required environment variables, we can use the database
-        if (isCosmosConfig) {
+        if (isDynamoConfig) {
           return getCopilotMetricsForEnterpriseFromDatabase(filter);
         }
         return getCopilotMetricsForEnterpriseFromApi();
@@ -62,7 +61,7 @@ export const getCopilotMetrics = async (
       // As default option, we can use the organization API endpoint
       default:
         // If we have the required environment variables, we can use the database
-        if (isCosmosConfig) {
+        if (isDynamoConfig) {
           return getCopilotMetricsForOrgsFromDatabase(filter);
         }
         return getCopilotMetricsForOrgsFromApi();
@@ -157,9 +156,8 @@ export const getCopilotMetricsForEnterpriseFromApi = async (): Promise<
 export const getCopilotMetricsForOrgsFromDatabase = async (
   filter: IFilter
 ): Promise<ServerActionResponse<CopilotUsageOutput[]>> => {
-  const client = cosmosClient();
-  const database = client.database("platform-engineering");
-  const container = database.container("history");
+  const client = dynamoClient();
+  const tableName = "platform-engineering-history";
 
   let start = "";
   let end = "";
@@ -179,19 +177,20 @@ export const getCopilotMetricsForOrgsFromDatabase = async (
     end = format(todayDate, "yyyy-MM-dd");
   }
 
-  let querySpec: SqlQuerySpec = {
-    query: `SELECT * FROM c WHERE c.day >= @start AND c.day <= @end`,
-    parameters: [
-      { name: "@start", value: start },
-      { name: "@end", value: end },
-    ],
+  const params = {
+    TableName: tableName,
+    FilterExpression: "#day >= :start AND #day <= :end",
+    ExpressionAttributeNames: {
+      "#day": "day",
+    },
+    ExpressionAttributeValues: {
+      ":start": start,
+      ":end": end,
+    },
   };
 
-  const { resources } = await container.items
-    .query<CopilotUsageOutput>(querySpec, {
-      maxItemCount: maxDays,
-    })
-    .fetchAll();
+  const data = await client.scan(params).promise();
+  const resources = data.Items as CopilotUsageOutput[];
 
   const dataWithTimeFrame = applyTimeFrameLabel(resources);
   return {
@@ -203,9 +202,8 @@ export const getCopilotMetricsForOrgsFromDatabase = async (
 export const getCopilotMetricsForEnterpriseFromDatabase = async (
   filter: IFilter
 ): Promise<ServerActionResponse<CopilotUsageOutput[]>> => {
-  const client = cosmosClient();
-  const database = client.database("platform-engineering");
-  const container = database.container("history");
+  const client = dynamoClient();
+  const tableName = "platform-engineering-history";
 
   let start = "";
   let end = "";
@@ -224,19 +222,20 @@ export const getCopilotMetricsForEnterpriseFromDatabase = async (
     end = format(todayDate, "yyyy-MM-dd");
   }
 
-  let querySpec: SqlQuerySpec = {
-    query: `SELECT * FROM c WHERE c.day >= @start AND c.day <= @end`,
-    parameters: [
-      { name: "@start", value: start },
-      { name: "@end", value: end },
-    ],
+  const params = {
+    TableName: tableName,
+    FilterExpression: "#day >= :start AND #day <= :end",
+    ExpressionAttributeNames: {
+      "#day": "day",
+    },
+    ExpressionAttributeValues: {
+      ":start": start,
+      ":end": end,
+    },
   };
 
-  const { resources } = await container.items
-    .query<CopilotUsageOutput>(querySpec, {
-      maxItemCount: maxDays,
-    })
-    .fetchAll();
+  const data = await client.scan(params).promise();
+  const resources = data.Items as CopilotUsageOutput[];
 
   const dataWithTimeFrame = applyTimeFrameLabel(resources);
   return {

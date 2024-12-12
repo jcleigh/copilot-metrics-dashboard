@@ -1,7 +1,7 @@
-using Microsoft.Azure.Functions.Worker;
+using Amazon.Lambda.Core;
+using Amazon.Lambda.SQSEvents;
 using Microsoft.CopilotDashboard.DataIngestion.Models;
 using Microsoft.CopilotDashboard.DataIngestion.Services;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
 namespace Microsoft.CopilotDashboard.DataIngestion.Functions;
@@ -17,12 +17,10 @@ public class CopilotSeatsIngestion
         _logger = logger;
     }
 
-    [Function("GitHubCopilotSeatsIngestion")]
-    [CosmosDBOutput(databaseName: "platform-engineering", containerName: "seats_history", Connection = "AZURE_COSMOSDB_ENDPOINT", CreateIfNotExists = true)]
-
-    public async Task<CopilotAssignedSeats> Run([TimerTrigger("0 0 * * * *")] TimerInfo myTimer)
+    [LambdaFunction]
+    public async Task<CopilotAssignedSeats> Run(SQSEvent sqsEvent)
     {
-        _logger.LogInformation($"GitHubCopilotSeatsIngestion timer trigger function executed at: {DateTime.Now}");
+        _logger.LogInformation($"GitHubCopilotSeatsIngestion SQS event function executed at: {DateTime.Now}");
 
         CopilotAssignedSeats seats;
 
@@ -47,10 +45,7 @@ public class CopilotSeatsIngestion
             seats = await _gitHubCopilotApiService.GetOrganizationAssignedSeatsAsync(organization, token);
         }
 
-        if (myTimer.ScheduleStatus is not null)
-        {
-            _logger.LogInformation($"Finished ingestion. Next timer schedule at: {myTimer.ScheduleStatus.Next}");
-        }
+        _logger.LogInformation($"Finished ingestion. SQS event processed at: {DateTime.Now}");
 
         return seats;
     }
