@@ -8,10 +8,10 @@ import {
   CopilotSeatsData,
   CopilotSeatManagementData,
 } from "@/features/common/models";
-import { cosmosClient, cosmosConfiguration } from "./cosmos-db-service";
+import { cosmosClient, cosmosConfiguration, useLocalDatabase } from "./cosmos-db-service";
 import { format } from "date-fns";
-import { SqlQuerySpec } from "@azure/cosmos";
 import { stringIsNullOrEmpty } from "../utils/helpers";
+import { executeQuery, QueryParams } from "./local-db-service";
 
 export interface IFilter {
   date?: Date;
@@ -24,7 +24,7 @@ export const getCopilotSeats = async (
   filter: IFilter
 ): Promise<ServerActionResponse<CopilotSeatsData>> => {
   const env = ensureGitHubEnvConfig();
-  const isCosmosConfig = cosmosConfiguration();
+  const isDbConfig = cosmosConfiguration();
 
   if (env.status !== "OK") {
     return env;
@@ -45,7 +45,7 @@ export const getCopilotSeats = async (
         }
         break;
     }
-    if (isCosmosConfig) {
+    if (isDbConfig) {
       return getCopilotSeatsFromDatabase(filter);
     }
     return getCopilotSeatsFromApi(filter);
@@ -57,53 +57,103 @@ export const getCopilotSeats = async (
 const getCopilotSeatsFromDatabase = async (
   filter: IFilter
 ): Promise<ServerActionResponse<CopilotSeatsData>> => {
-  const client = cosmosClient();
-  const database = client.database("platform-engineering");
-  const container = database.container("seats_history");
+  try {
+    let date = "";
+    const maxDays = 365 * 2; // maximum 2 years of data
 
-  let date = "";
-  const maxDays = 365 * 2; // maximum 2 years of data
+    if (filter.date) {
+      date = format(filter.date, "yyyy-MM-dd");
+    } else {
+      const today = new Date();
+      date = format(today, "yyyy-MM-dd");
+    }
 
-  if (filter.date) {
-    date = format(filter.date, "yyyy-MM-dd");
-  } else {
-    const today = new Date();
-    date = format(today, "yyyy-MM-dd");
+    if (useLocalDatabase) {
+      // SQLite query
+      let query = "SELECT * FROM seats_history WHERE date = :date";
+      const params: Record<string, any> = { date };
+      
+      if (filter.enterprise) {
+        query += " AND enterprise = :enterprise";
+        params.enterprise = filter.enterprise;
+      }
+
+      if (filter.organization) {
+        query += " AND organization = :organization";
+        params.organization = filter.organization;
+      }
+      
+      if (filter.team) {
+        query += " AND team = :team";
+        params.team = filter.team;
+      }
+
+      const queryParams: QueryParams = { query, params };
+      const results = executeQuery<any>(queryParams);
+
+      if (results.length === 0) {
+        return {
+          status: "ERROR",
+          errors: [{ message: "No seat data found for the specified criteria" }]
+        };
+      }
+
+      // Parse the JSON data from the row
+      const seatData = {
+        ...results[0],
+        seats: JSON.parse(results[0].seats)
+      };
+
+      return {
+        status: "OK",
+        response: seatData as CopilotSeatsData,
+      };
+    } else {
+      // Original CosmosDB implementation
+      const client = cosmosClient();
+      const database = client.database("platform-engineering");
+      const container = database.container("seats_history");
+
+      let querySpec = {
+        query: `SELECT * FROM c WHERE c.date = @date`,
+        parameters: [{ name: "@date", value: date }],
+      };
+      
+      if (filter.enterprise) {
+        querySpec.query += ` AND c.enterprise = @enterprise`;
+        querySpec.parameters?.push({
+          name: "@enterprise",
+          value: filter.enterprise,
+        });
+      }
+      
+      if (filter.organization) {
+        querySpec.query += ` AND c.organization = @organization`;
+        querySpec.parameters?.push({
+          name: "@organization",
+          value: filter.organization,
+        });
+      }
+      
+      if (filter.team) {
+        querySpec.query += ` AND c.team = @team`;
+        querySpec.parameters?.push({ name: "@team", value: filter.team });
+      }
+
+      const { resources } = await container.items
+        .query<CopilotSeatsData>(querySpec, {
+          maxItemCount: maxDays,
+        })
+        .fetchAll();
+
+      return {
+        status: "OK",
+        response: resources[0],
+      };
+    }
+  } catch (e) {
+    return unknownResponseError(e);
   }
-
-  let querySpec: SqlQuerySpec = {
-    query: `SELECT * FROM c WHERE c.date = @date`,
-    parameters: [{ name: "@date", value: date }],
-  };
-  if (filter.enterprise) {
-    querySpec.query += ` AND c.enterprise = @enterprise`;
-    querySpec.parameters?.push({
-      name: "@enterprise",
-      value: filter.enterprise,
-    });
-  }
-  if (filter.organization) {
-    querySpec.query += ` AND c.organization = @organization`;
-    querySpec.parameters?.push({
-      name: "@organization",
-      value: filter.organization,
-    });
-  }
-  if (filter.team) {
-    querySpec.query += ` AND c.team = @team`;
-    querySpec.parameters?.push({ name: "@team", value: filter.team });
-  }
-
-  const { resources } = await container.items
-    .query<CopilotSeatsData>(querySpec, {
-      maxItemCount: maxDays,
-    })
-    .fetchAll();
-
-  return {
-    status: "OK",
-    response: resources[0],
-  };
 };
 
 const getCopilotSeatsFromApi = async (

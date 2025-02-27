@@ -2,23 +2,85 @@ This is a [Next.js](https://nextjs.org/) project bootstrapped with [`create-next
 
 ## Getting Started
 
-First, run the development server:
+First, install the dependencies:
 
 ```bash
-npm run dev
+npm install
 # or
-yarn dev
+yarn
 # or
-pnpm dev
+pnpm install
 # or
-bun dev
+bun install
 ```
+
+### Local Development Setup
+
+This project can run completely locally without requiring Azure cloud services:
+
+1. Copy the `.env.local` file and update it with your GitHub credentials:
+   ```bash
+   # No need to change these for local development with sample data
+   USE_LOCAL_DB=true
+   LOCAL_DB_PATH=./data/copilot-metrics.db
+   
+   # Update these with your actual GitHub values if you want to fetch real data
+   GITHUB_ORGANIZATION=your-organization
+   GITHUB_ENTERPRISE=your-enterprise
+   GITHUB_TOKEN=your-github-token
+   GITHUB_API_VERSION=2022-11-28
+   GITHUB_API_SCOPE=organization
+   ```
+
+2. Seed the local database with sample data:
+   ```bash
+   npm run db:seed
+   # or
+   yarn db:seed
+   ```
+
+3. Run the development server:
+   ```bash
+   npm run dev
+   # or
+   yarn dev
+   # or
+   pnpm dev
+   # or
+   bun dev
+   ```
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Database Management
 
-This project uses [`next/font`](https://nextjs.org/docs/basic-features/font-optimization) to automatically optimize and load Inter, a custom Google Font.
+The application uses a local SQLite database by default. You can manage it using these commands:
+
+```bash
+# Seed the database with sample data
+npm run db:seed
+
+# Clear all data from the database
+npm run db:clear
+
+# Check database status and record counts
+npm run db:status
+```
+
+The database is stored in the `./data` directory by default but can be configured via the `LOCAL_DB_PATH` environment variable.
+
+## Architecture
+
+This application uses:
+- NextJS for the frontend and API routes
+- SQLite for local data storage (instead of Azure CosmosDB)
+- GitHub API for fetching Copilot metrics and seat data
+
+You can modify the code to switch back to using Azure services by setting:
+```
+USE_LOCAL_DB=false
+```
+in your `.env.local` file and providing Azure CosmosDB credentials.
 
 ## Learn More
 

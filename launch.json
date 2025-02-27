@@ -1,0 +1,23 @@
+{
+  "configurations": [
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Launch Next.js App",
+      "program": "${workspaceFolder}/src/dashboard/node_modules/.bin/next",
+      "args": ["dev"],
+      "cwd": "${workspaceFolder}/src/dashboard",
+      "runtimeExecutable": "node",
+      "preLaunchTask": "npm: install"
+    }
+  ],
+  "tasks": [
+    {
+      "type": "npm",
+      "script": "install",
+      "group": "build",
+      "label": "npm: install",
+      "detail": "Install npm dependencies"
+    }
+  ]
+}

@@ -7,12 +7,12 @@ import {
   CopilotUsageOutput,
 } from "@/features/common/models";
 import { ServerActionResponse } from "@/features/common/server-action-response";
-import { SqlQuerySpec } from "@azure/cosmos";
 import { format } from "date-fns";
-import { cosmosClient, cosmosConfiguration } from "./cosmos-db-service";
+import { cosmosClient, cosmosConfiguration, useLocalDatabase } from "./cosmos-db-service";
 import { ensureGitHubEnvConfig } from "./env-service";
 import { stringIsNullOrEmpty, applyTimeFrameLabel } from "../utils/helpers";
 import { sampleData } from "./sample-data";
+import { executeQuery, QueryParams } from "./local-db-service";
 
 export interface IFilter {
   startDate?: Date;
@@ -26,7 +26,7 @@ export const getCopilotMetrics = async (
   filter: IFilter
 ): Promise<ServerActionResponse<CopilotUsageOutput[]>> => {
   const env = ensureGitHubEnvConfig();
-  const isCosmosConfig = cosmosConfiguration();
+  const isDbConfig = cosmosConfiguration();
 
   if (env.status !== "OK") {
     return env;
@@ -47,7 +47,7 @@ export const getCopilotMetrics = async (
         }
         break;
     }
-    if (isCosmosConfig) {
+    if (isDbConfig) {
       return getCopilotMetricsFromDatabase(filter);
     }
     return getCopilotMetricsFromApi(filter);
@@ -121,68 +121,112 @@ export const getCopilotMetricsFromApi = async (
 export const getCopilotMetricsFromDatabase = async (
   filter: IFilter
 ): Promise<ServerActionResponse<CopilotUsageOutput[]>> => {
-  const client = cosmosClient();
-  const database = client.database("platform-engineering");
-  const container = database.container("metrics_history");
+  try {
+    let start = "";
+    let end = "";
+    const maxDays = 365 * 2; // maximum 2 years of data
+    const maximumDays = 31;
 
-  let start = "";
-  let end = "";
-  const maxDays = 365 * 2; // maximum 2 years of data
-  const maximumDays = 31;
+    if (filter.startDate && filter.endDate) {
+      start = format(filter.startDate, "yyyy-MM-dd");
+      end = format(filter.endDate, "yyyy-MM-dd");
+    } else {
+      // set the start date to today and the end date to 31 days ago
+      const todayDate = new Date();
+      const startDate = new Date(todayDate);
+      startDate.setDate(todayDate.getDate() - maximumDays);
 
-  if (filter.startDate && filter.endDate) {
-    start = format(filter.startDate, "yyyy-MM-dd");
-    end = format(filter.endDate, "yyyy-MM-dd");
-  } else {
-    // set the start date to today and the end date to 31 days ago
-    const todayDate = new Date();
-    const startDate = new Date(todayDate);
-    startDate.setDate(todayDate.getDate() - maximumDays);
+      start = format(startDate, "yyyy-MM-dd");
+      end = format(todayDate, "yyyy-MM-dd");
+    }
 
-    start = format(startDate, "yyyy-MM-dd");
-    end = format(todayDate, "yyyy-MM-dd");
+    // Build query based on the database being used
+    if (useLocalDatabase) {
+      // SQLite query
+      let query = "SELECT * FROM metrics_history WHERE date >= :start AND date <= :end";
+      const params: Record<string, any> = { start, end };
+      
+      if (filter.enterprise) {
+        query += " AND enterprise = :enterprise";
+        params.enterprise = filter.enterprise;
+      }
+
+      if (filter.organization) {
+        query += " AND organization = :organization";
+        params.organization = filter.organization;
+      }
+      
+      if (filter.team) {
+        query += " AND team = :team";
+        params.team = filter.team;
+      }
+
+      const queryParams: QueryParams = { query, params };
+      const results = executeQuery<any>(queryParams);
+
+      // Parse the JSON data from each row
+      const metrics = results.map(row => {
+        return {
+          ...row,
+          ...JSON.parse(row.data)
+        };
+      });
+
+      const dataWithTimeFrame = applyTimeFrameLabel(metrics);
+      return {
+        status: "OK",
+        response: dataWithTimeFrame,
+      };
+    } else {
+      // Original CosmosDB implementation
+      const client = cosmosClient();
+      const database = client.database("platform-engineering");
+      const container = database.container("metrics_history");
+
+      let querySpec = {
+        query: `SELECT * FROM c WHERE c.date >= @start AND c.date <= @end`,
+        parameters: [
+          { name: "@start", value: start },
+          { name: "@end", value: end },
+        ],
+      };
+
+      if (filter.enterprise) {
+        querySpec.query += ` AND c.enterprise = @enterprise`;
+        querySpec.parameters?.push({
+          name: "@enterprise",
+          value: filter.enterprise,
+        });
+      }
+
+      if (filter.organization) {
+        querySpec.query += ` AND c.organization = @organization`;
+        querySpec.parameters?.push({
+          name: "@organization",
+          value: filter.organization,
+        });
+      }
+      
+      if (filter.team) {
+        querySpec.query += ` AND c.team = @team`;
+        querySpec.parameters?.push({ name: "@team", value: filter.team });
+      }
+
+      const { resources } = await container.items
+        .query<CopilotMetrics>(querySpec, {
+          maxItemCount: maxDays,
+        })
+        .fetchAll();
+
+      const dataWithTimeFrame = applyTimeFrameLabel(resources);
+      return {
+        status: "OK",
+        response: dataWithTimeFrame,
+      };
+    }
+  } catch (e) {
+    return unknownResponseError(e);
   }
-
-  let querySpec: SqlQuerySpec = {
-    query: `SELECT * FROM c WHERE c.date >= @start AND c.date <= @end`,
-    parameters: [
-      { name: "@start", value: start },
-      { name: "@end", value: end },
-    ],
-  };
-
-  if (filter.enterprise) {
-    querySpec.query += ` AND c.enterprise = @enterprise`;
-    querySpec.parameters?.push({
-      name: "@enterprise",
-      value: filter.enterprise,
-    });
-  }
-
-  if (filter.organization) {
-    querySpec.query += ` AND c.organization = @organization`;
-    querySpec.parameters?.push({
-      name: "@organization",
-      value: filter.organization,
-    });
-  }
-  
-  if (filter.team) {
-    querySpec.query += ` AND c.team = @team`;
-    querySpec.parameters?.push({ name: "@team", value: filter.team });
-  }
-
-  const { resources } = await container.items
-    .query<CopilotMetrics>(querySpec, {
-      maxItemCount: maxDays,
-    })
-    .fetchAll();
-
-  const dataWithTimeFrame = applyTimeFrameLabel(resources);
-  return {
-    status: "OK",
-    response: dataWithTimeFrame,
-  };
 };
 
 export const _getCopilotMetrics = (): Promise<CopilotUsageOutput[]> => {
