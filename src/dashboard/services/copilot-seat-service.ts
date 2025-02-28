@@ -45,9 +45,9 @@ export const getCopilotSeats = async (
         }
         break;
     }
-    if (isDynamoDBConfig) {
-      return getCopilotSeatsFromDatabase(filter);
-    }
+    // if (isDynamoDBConfig) {
+    //   return getCopilotSeatsFromDatabase(filter);
+    // }
     return getCopilotSeatsFromApi(filter);
   } catch (e) {
     return unknownResponseError(e);
@@ -60,43 +60,42 @@ const getCopilotSeatsFromDatabase = async (
   const client = dynamoDbClient();
   const tableName = "seats_history";
 
-  let date = "";
+  let recordDate = "";
   
   if (filter.date) {
-    date = format(filter.date, "yyyy-MM-dd");
+    recordDate = format(filter.date, "yyyy-MM-dd");
   } else {
     const today = new Date();
-    date = format(today, "yyyy-MM-dd");
+    recordDate = format(today, "yyyy-MM-dd");
   }
 
   // Start with basic query parameters
-  let keyConditionExpression = "date = :date";
   let expressionAttributeValues: Record<string, any> = {
-    ":date": date,
+    ":recordDate": recordDate,
   };
-  let filterExpression = "";
+  let filterExpressions: string[] = [];
 
   // Add filters for enterprise or organization
   if (filter.enterprise) {
-    filterExpression = "enterprise = :enterprise";
+    filterExpressions.push("enterprise = :enterprise");
     expressionAttributeValues[":enterprise"] = filter.enterprise;
   } else if (filter.organization) {
-    filterExpression = "organization = :organization";
+    filterExpressions.push("organization = :organization");
     expressionAttributeValues[":organization"] = filter.organization;
   }
 
   // Add filter for team if provided
   if (filter.team) {
-    filterExpression += filterExpression ? " AND " : "";
-    filterExpression += "team = :team";
+    filterExpressions.push("team = :team");
     expressionAttributeValues[":team"] = filter.team;
   }
 
   const queryParams = {
     TableName: tableName,
-    KeyConditionExpression: keyConditionExpression,
+    IndexName: "DateIndex",
+    KeyConditionExpression: "recordDate = :recordDate",
     ExpressionAttributeValues: expressionAttributeValues,
-    ...(filterExpression && { FilterExpression: filterExpression }),
+    ...(filterExpressions.length > 0 && { FilterExpression: filterExpressions.join(" AND ") }),
     Limit: 1 // We only need one item
   };
 
@@ -141,7 +140,7 @@ const getCopilotSeatsFromApi = async (
         seats: [],
         total_seats: 0,
         last_update: format(today, "yyyy-MM-ddTHH:mm:ss"),
-        date: format(today, "yyyy-MM-dd"),
+        recordDate: format(today, "yyyy-MM-dd"),
         id: `${today}-ENT-${filter.enterprise}`,
         organization: null,
       };
@@ -181,7 +180,7 @@ const getCopilotSeatsFromApi = async (
         seats: [],
         total_seats: 0,
         last_update: format(today, "yyyy-MM-ddTHH:mm:ss"),
-        date: format(today, "yyyy-MM-dd"),
+        recordDate: format(today, "yyyy-MM-dd"),
         id: `${today}-ORG-${filter.organization}`,
         enterprise: null,
       };
@@ -260,7 +259,7 @@ export const getCopilotSeatsManagement = async (
     const seatManagementData: CopilotSeatManagementData = {
       enterprise: seatsData.enterprise,
       organization: seatsData.organization,
-      date: seatsData.date,
+      recordDate: seatsData.recordDate,
       id: seatsData.id,
       last_update: seatsData.last_update,
       total_seats: seatsData.total_seats,

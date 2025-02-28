@@ -47,9 +47,9 @@ export const getCopilotMetrics = async (
         }
         break;
     }
-    if (isDynamoDBConfig) {
-      return getCopilotMetricsFromDatabase(filter);
-    }
+    // if (isDynamoDBConfig) {
+    //   return getCopilotMetricsFromDatabase(filter);
+    // }
     return getCopilotMetricsFromApi(filter);
   } catch (e) {
     return unknownResponseError(e);
@@ -141,63 +141,71 @@ export const getCopilotMetricsFromDatabase = async (
     end = format(todayDate, "yyyy-MM-dd");
   }
 
-  // For DynamoDB, we'll need a different approach than CosmosDB SQL queries
-  // We'll use a between operator on the date for a date range query
-  let expressionAttributeValues: Record<string, any> = {
-    ":start": start,
-    ":end": end
-  };
+  // For DynamoDB, we'll query each date within our range
+  const allItems: any[] = [];
+  let currentDate = new Date(start);
+  const endDate = new Date(end);
 
-  // Build the filter expression for additional conditions
-  let filterExpressions: string[] = ["date BETWEEN :start AND :end"];
-  
-  if (filter.enterprise) {
-    filterExpressions.push("enterprise = :enterprise");
-    expressionAttributeValues[":enterprise"] = filter.enterprise;
-  }
+  while (currentDate <= endDate) {
+    const formattedDate = format(currentDate, "yyyy-MM-dd");
+    let expressionAttributeValues: Record<string, any> = {
+      ":recordDate": formattedDate,
+    };
 
-  if (filter.organization) {
-    filterExpressions.push("organization = :organization");
-    expressionAttributeValues[":organization"] = filter.organization;
-  }
-
-  if (filter.team) {
-    filterExpressions.push("team = :team");
-    expressionAttributeValues[":team"] = filter.team;
-  }
-
-  // Using a Global Secondary Index for date queries if available
-  // Here we're assuming there's a GSI with 'date' as the partition key
-  // If your actual DynamoDB design is different, this will need adjustment
-  const params = {
-    TableName: tableName,
-    IndexName: "DateIndex", // Assuming there's a GSI named DateIndex with date as the key
-    KeyConditionExpression: "date BETWEEN :start AND :end",
-    ExpressionAttributeValues: expressionAttributeValues,
-    FilterExpression: filterExpressions.slice(1).join(" AND ")
-  };
-
-  try {
-    const command = new QueryCommand(params);
-    const response = await client.send(command);
+    let filterExpressions: string[] = [];
     
-    if (!response.Items || response.Items.length === 0) {
-      return {
-        status: "ERROR",
-        error: {
-          message: "No data found for the specified date range",
-        }
-      };
+    if (filter.enterprise) {
+      filterExpressions.push("enterprise = :enterprise");
+      expressionAttributeValues[":enterprise"] = filter.enterprise;
     }
 
-    const dataWithTimeFrame = applyTimeFrameLabel(response.Items as CopilotMetrics[]);
-    return {
-      status: "OK",
-      response: dataWithTimeFrame,
+    if (filter.organization) {
+      filterExpressions.push("organization = :organization");
+      expressionAttributeValues[":organization"] = filter.organization;
+    }
+
+    if (filter.team) {
+      filterExpressions.push("team = :team");
+      expressionAttributeValues[":team"] = filter.team;
+    }
+
+    const params = {
+      TableName: tableName,
+      IndexName: "DateIndex",
+      KeyConditionExpression: "recordDate = :recordDate",
+      ExpressionAttributeValues: expressionAttributeValues,
+      ...(filterExpressions.length > 0 && { FilterExpression: filterExpressions.join(" AND ") })
     };
-  } catch (error) {
-    return unknownResponseError(error);
+
+    try {
+      const command = new QueryCommand(params);
+      const response = await client.send(command);
+      
+      if (response.Items && response.Items.length > 0) {
+        allItems.push(...response.Items);
+      }
+    } catch (error) {
+      return unknownResponseError(error);
+    }
+
+    // Move to next date
+    currentDate.setDate(currentDate.getDate() + 1);
   }
+
+  if (allItems.length === 0) {
+    return {
+      status: "ERROR",
+      error: {
+        message: "No data found for the specified date range",
+      }
+    };
+  }
+
+  const dataWithTimeFrame = applyTimeFrameLabel(allItems as CopilotMetrics[]);
+  return {
+    status: "OK",
+    response: dataWithTimeFrame,
+  };
 };
 
 export const _getCopilotMetrics = (): Promise<CopilotUsageOutput[]> => {

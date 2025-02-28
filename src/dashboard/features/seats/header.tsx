@@ -3,16 +3,16 @@ import { DateFilter } from "./filters/date-filter";
 
 interface HeaderProps {
   title: string;
-  isCosmosDb?: boolean;
+  isDynamoDb?: boolean;
 }
 
-export const Header = ({ title, isCosmosDb }: HeaderProps) => {
+export const Header = ({ title, isDynamoDb: isDynamoDb }: HeaderProps) => {
   return (
     <PageHeader>
       <PageTitle>{title}</PageTitle>
       <div className="flex gap-8 justify-between flex-col md:flex-row">
         <div className="flex gap-2">
-          <DateFilter disabled={!isCosmosDb} />
+          <DateFilter disabled={!isDynamoDb} />
         </div>
       </div>
     </PageHeader>

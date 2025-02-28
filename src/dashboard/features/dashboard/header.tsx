@@ -4,10 +4,10 @@ import { DateFilter } from "./filter/date-filter";
 import { Filters } from "./filter/header-filter";
 
 interface HeaderProps {
-  isCosmosDb?: boolean;
+  isDynamoDb?: boolean;
 }
 
-export const Header = ({ isCosmosDb }: HeaderProps) => {
+export const Header = ({ isDynamoDb: isDynamoDb }: HeaderProps) => {
   return (
     <PageHeader>
       <PageTitle>GitHub Copilot Metrics</PageTitle>
@@ -15,7 +15,7 @@ export const Header = ({ isCosmosDb }: HeaderProps) => {
         <Filters />
         <div className="flex gap-2">
           <WeekendFilter />
-          <DateFilter limited={!isCosmosDb} />
+          <DateFilter limited={!isDynamoDb} />
         </div>
       </div>
     </PageHeader>

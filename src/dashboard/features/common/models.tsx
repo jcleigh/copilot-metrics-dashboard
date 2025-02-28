@@ -65,7 +65,7 @@ export interface SeatAssignment {
 
 export interface CopilotSeatsData {
     id: string;
-    date: string;
+    recordDate: string;
     total_seats: number;
     seats: SeatAssignment[];
     enterprise: string | null;
@@ -75,7 +75,7 @@ export interface CopilotSeatsData {
 
 export interface CopilotSeatManagementData {
     id: string;
-    date: string;
+    recordDate: string;
     total_seats: number;
     seats: SeatManagement;
     enterprise: string | null;
@@ -195,7 +195,8 @@ export interface SeatBreakdown {
   }
   
   export interface CopilotMetrics {
-    date: string;
+    recordDate?: string;
+    date?: string;
     total_active_users: number;
     total_engaged_users: number;
     copilot_ide_code_completions: CopilotIDEMetrics;

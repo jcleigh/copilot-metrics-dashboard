@@ -5,17 +5,28 @@ import { fromEnv } from "@aws-sdk/credential-providers";
 import { stringIsNullOrEmpty } from "../utils/helpers";
 
 export const dynamoDbClient = () => {
+  const isLocal = process.env.DYNAMODB_LOCAL === 'true';
   const region = process.env.AWS_REGION;
+  const endpoint = process.env.DYNAMODB_ENDPOINT || 'http://localhost:8000';
 
-  if(stringIsNullOrEmpty(region)) {
+  if(!isLocal && stringIsNullOrEmpty(region)) {
     throw new Error("Missing required environment variable for AWS region");
   }
 
   // Create the DynamoDB client
-  const client = new DynamoDBClient({ 
-    region,
-    credentials: fromEnv()
-  });
+  const client = isLocal 
+    ? new DynamoDBClient({
+        endpoint,
+        region: 'local-env',
+        credentials: {
+          accessKeyId: 'local',
+          secretAccessKey: 'local',
+        }
+      })
+    : new DynamoDBClient({ 
+        region,
+        credentials: fromEnv()
+      });
 
   // Create the DynamoDB document client wrapper
   return DynamoDBDocumentClient.from(client, {
@@ -26,11 +37,12 @@ export const dynamoDbClient = () => {
 };
 
 export const dynamoDBConfiguration = (): boolean => {
+  const isLocal = process.env.DYNAMODB_LOCAL === 'true';
   const region = process.env.AWS_REGION;
 
   return (
-    region !== undefined &&
-    region.trim() !== ""
+    isLocal ||
+    (region !== undefined && region.trim() !== "")
   );
 };
 

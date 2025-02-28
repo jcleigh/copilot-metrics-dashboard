@@ -1,0 +1,18 @@
+[
+  {
+    "IndexName": "DateIndex",
+    "KeySchema": [
+      {
+        "AttributeName": "recordDate",
+        "KeyType": "HASH"
+      }
+    ],
+    "Projection": {
+      "ProjectionType": "ALL"
+    },
+    "ProvisionedThroughput": {
+      "ReadCapacityUnits": 5,
+      "WriteCapacityUnits": 5
+    }
+  }
+]

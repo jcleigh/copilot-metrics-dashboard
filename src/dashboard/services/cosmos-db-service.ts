@@ -1,24 +1,7 @@
-import { ServerActionResponse } from "@/features/common/server-action-response";
-import { CosmosClient } from "@azure/cosmos";
-import { DefaultAzureCredential } from "@azure/identity";
-import { stringIsNullOrEmpty } from "../utils/helpers";
-
-export const cosmosClient = () => {
-  const endpoint = process.env.AZURE_COSMOSDB_ENDPOINT;
-
-  if(stringIsNullOrEmpty(endpoint)) {
-    throw new Error("Missing required environment variable for CosmosDB endpoint");
-  }
-
-  const credential = new DefaultAzureCredential();
-  return new CosmosClient({ endpoint, aadCredentials: credential });
-};
+// This file is deprecated as the application now uses DynamoDB instead of CosmosDB.
+// The cosmosConfiguration function is kept for backward compatibility, but returns false.
 
 export const cosmosConfiguration = (): boolean => {
-  const endpoint = process.env.AZURE_COSMOSDB_ENDPOINT;
-
-  return (
-    endpoint !== undefined &&
-    endpoint.trim() !== ""
-  );
+  // Always return false since CosmosDB is no longer supported
+  return false;
 };

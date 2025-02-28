@@ -3,7 +3,7 @@ import { CopilotMetrics } from "@/features/common/models";
 export const sampleData: CopilotMetrics[] = 
 [
   {
-    "date": "2024-06-24",
+    "recordDate": "2024-06-24",
     "total_active_users": 24,
     "total_engaged_users": 20,
     "copilot_ide_code_completions": {
