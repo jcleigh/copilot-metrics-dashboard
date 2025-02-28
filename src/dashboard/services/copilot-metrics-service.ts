@@ -7,12 +7,12 @@ import {
   CopilotUsageOutput,
 } from "@/features/common/models";
 import { ServerActionResponse } from "@/features/common/server-action-response";
-import { SqlQuerySpec } from "@azure/cosmos";
 import { format } from "date-fns";
-import { cosmosClient, cosmosConfiguration } from "./cosmos-db-service";
+import { dynamoDbClient, dynamoDBConfiguration } from "./dynamodb-service";
 import { ensureGitHubEnvConfig } from "./env-service";
 import { stringIsNullOrEmpty, applyTimeFrameLabel } from "../utils/helpers";
 import { sampleData } from "./sample-data";
+import { QueryCommand } from "@aws-sdk/lib-dynamodb";
 
 export interface IFilter {
   startDate?: Date;
@@ -26,7 +26,7 @@ export const getCopilotMetrics = async (
   filter: IFilter
 ): Promise<ServerActionResponse<CopilotUsageOutput[]>> => {
   const env = ensureGitHubEnvConfig();
-  const isCosmosConfig = cosmosConfiguration();
+  const isDynamoDBConfig = dynamoDBConfiguration();
 
   if (env.status !== "OK") {
     return env;
@@ -47,7 +47,7 @@ export const getCopilotMetrics = async (
         }
         break;
     }
-    if (isCosmosConfig) {
+    if (isDynamoDBConfig) {
       return getCopilotMetricsFromDatabase(filter);
     }
     return getCopilotMetricsFromApi(filter);
@@ -121,13 +121,11 @@ export const getCopilotMetricsFromApi = async (
 export const getCopilotMetricsFromDatabase = async (
   filter: IFilter
 ): Promise<ServerActionResponse<CopilotUsageOutput[]>> => {
-  const client = cosmosClient();
-  const database = client.database("platform-engineering");
-  const container = database.container("metrics_history");
+  const client = dynamoDbClient();
+  const tableName = "metrics_history";
 
   let start = "";
   let end = "";
-  const maxDays = 365 * 2; // maximum 2 years of data
   const maximumDays = 31;
 
   if (filter.startDate && filter.endDate) {
@@ -143,46 +141,63 @@ export const getCopilotMetricsFromDatabase = async (
     end = format(todayDate, "yyyy-MM-dd");
   }
 
-  let querySpec: SqlQuerySpec = {
-    query: `SELECT * FROM c WHERE c.date >= @start AND c.date <= @end`,
-    parameters: [
-      { name: "@start", value: start },
-      { name: "@end", value: end },
-    ],
+  // For DynamoDB, we'll need a different approach than CosmosDB SQL queries
+  // We'll use a between operator on the date for a date range query
+  let expressionAttributeValues: Record<string, any> = {
+    ":start": start,
+    ":end": end
   };
 
+  // Build the filter expression for additional conditions
+  let filterExpressions: string[] = ["date BETWEEN :start AND :end"];
+  
   if (filter.enterprise) {
-    querySpec.query += ` AND c.enterprise = @enterprise`;
-    querySpec.parameters?.push({
-      name: "@enterprise",
-      value: filter.enterprise,
-    });
+    filterExpressions.push("enterprise = :enterprise");
+    expressionAttributeValues[":enterprise"] = filter.enterprise;
   }
 
   if (filter.organization) {
-    querySpec.query += ` AND c.organization = @organization`;
-    querySpec.parameters?.push({
-      name: "@organization",
-      value: filter.organization,
-    });
+    filterExpressions.push("organization = :organization");
+    expressionAttributeValues[":organization"] = filter.organization;
   }
-  
+
   if (filter.team) {
-    querySpec.query += ` AND c.team = @team`;
-    querySpec.parameters?.push({ name: "@team", value: filter.team });
+    filterExpressions.push("team = :team");
+    expressionAttributeValues[":team"] = filter.team;
   }
 
-  const { resources } = await container.items
-    .query<CopilotMetrics>(querySpec, {
-      maxItemCount: maxDays,
-    })
-    .fetchAll();
-
-  const dataWithTimeFrame = applyTimeFrameLabel(resources);
-  return {
-    status: "OK",
-    response: dataWithTimeFrame,
+  // Using a Global Secondary Index for date queries if available
+  // Here we're assuming there's a GSI with 'date' as the partition key
+  // If your actual DynamoDB design is different, this will need adjustment
+  const params = {
+    TableName: tableName,
+    IndexName: "DateIndex", // Assuming there's a GSI named DateIndex with date as the key
+    KeyConditionExpression: "date BETWEEN :start AND :end",
+    ExpressionAttributeValues: expressionAttributeValues,
+    FilterExpression: filterExpressions.slice(1).join(" AND ")
   };
+
+  try {
+    const command = new QueryCommand(params);
+    const response = await client.send(command);
+    
+    if (!response.Items || response.Items.length === 0) {
+      return {
+        status: "ERROR",
+        error: {
+          message: "No data found for the specified date range",
+        }
+      };
+    }
+
+    const dataWithTimeFrame = applyTimeFrameLabel(response.Items as CopilotMetrics[]);
+    return {
+      status: "OK",
+      response: dataWithTimeFrame,
+    };
+  } catch (error) {
+    return unknownResponseError(error);
+  }
 };
 
 export const _getCopilotMetrics = (): Promise<CopilotUsageOutput[]> => {

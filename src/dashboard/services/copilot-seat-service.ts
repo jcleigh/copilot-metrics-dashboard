@@ -8,9 +8,9 @@ import {
   CopilotSeatsData,
   CopilotSeatManagementData,
 } from "@/features/common/models";
-import { cosmosClient, cosmosConfiguration } from "./cosmos-db-service";
+import { dynamoDbClient, dynamoDBConfiguration, createDynamoDbQuery } from "./dynamodb-service";
 import { format } from "date-fns";
-import { SqlQuerySpec } from "@azure/cosmos";
+import { QueryCommand } from "@aws-sdk/lib-dynamodb";
 import { stringIsNullOrEmpty } from "../utils/helpers";
 
 export interface IFilter {
@@ -24,7 +24,7 @@ export const getCopilotSeats = async (
   filter: IFilter
 ): Promise<ServerActionResponse<CopilotSeatsData>> => {
   const env = ensureGitHubEnvConfig();
-  const isCosmosConfig = cosmosConfiguration();
+  const isDynamoDBConfig = dynamoDBConfiguration();
 
   if (env.status !== "OK") {
     return env;
@@ -45,7 +45,7 @@ export const getCopilotSeats = async (
         }
         break;
     }
-    if (isCosmosConfig) {
+    if (isDynamoDBConfig) {
       return getCopilotSeatsFromDatabase(filter);
     }
     return getCopilotSeatsFromApi(filter);
@@ -57,13 +57,11 @@ export const getCopilotSeats = async (
 const getCopilotSeatsFromDatabase = async (
   filter: IFilter
 ): Promise<ServerActionResponse<CopilotSeatsData>> => {
-  const client = cosmosClient();
-  const database = client.database("platform-engineering");
-  const container = database.container("seats_history");
+  const client = dynamoDbClient();
+  const tableName = "seats_history";
 
   let date = "";
-  const maxDays = 365 * 2; // maximum 2 years of data
-
+  
   if (filter.date) {
     date = format(filter.date, "yyyy-MM-dd");
   } else {
@@ -71,39 +69,57 @@ const getCopilotSeatsFromDatabase = async (
     date = format(today, "yyyy-MM-dd");
   }
 
-  let querySpec: SqlQuerySpec = {
-    query: `SELECT * FROM c WHERE c.date = @date`,
-    parameters: [{ name: "@date", value: date }],
+  // Start with basic query parameters
+  let keyConditionExpression = "date = :date";
+  let expressionAttributeValues: Record<string, any> = {
+    ":date": date,
   };
+  let filterExpression = "";
+
+  // Add filters for enterprise or organization
   if (filter.enterprise) {
-    querySpec.query += ` AND c.enterprise = @enterprise`;
-    querySpec.parameters?.push({
-      name: "@enterprise",
-      value: filter.enterprise,
-    });
+    filterExpression = "enterprise = :enterprise";
+    expressionAttributeValues[":enterprise"] = filter.enterprise;
+  } else if (filter.organization) {
+    filterExpression = "organization = :organization";
+    expressionAttributeValues[":organization"] = filter.organization;
   }
-  if (filter.organization) {
-    querySpec.query += ` AND c.organization = @organization`;
-    querySpec.parameters?.push({
-      name: "@organization",
-      value: filter.organization,
-    });
-  }
+
+  // Add filter for team if provided
   if (filter.team) {
-    querySpec.query += ` AND c.team = @team`;
-    querySpec.parameters?.push({ name: "@team", value: filter.team });
+    filterExpression += filterExpression ? " AND " : "";
+    filterExpression += "team = :team";
+    expressionAttributeValues[":team"] = filter.team;
   }
 
-  const { resources } = await container.items
-    .query<CopilotSeatsData>(querySpec, {
-      maxItemCount: maxDays,
-    })
-    .fetchAll();
-
-  return {
-    status: "OK",
-    response: resources[0],
+  const queryParams = {
+    TableName: tableName,
+    KeyConditionExpression: keyConditionExpression,
+    ExpressionAttributeValues: expressionAttributeValues,
+    ...(filterExpression && { FilterExpression: filterExpression }),
+    Limit: 1 // We only need one item
   };
+
+  try {
+    const command = new QueryCommand(queryParams);
+    const response = await client.send(command);
+    
+    if (!response.Items || response.Items.length === 0) {
+      return {
+        status: "ERROR",
+        error: {
+          message: "No data found for the specified filter",
+        }
+      };
+    }
+
+    return {
+      status: "OK",
+      response: response.Items[0] as CopilotSeatsData,
+    };
+  } catch (error) {
+    return unknownResponseError(error);
+  }
 };
 
 const getCopilotSeatsFromApi = async (
