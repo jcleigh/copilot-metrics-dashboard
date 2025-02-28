@@ -47,9 +47,9 @@ export const getCopilotMetrics = async (
         }
         break;
     }
-    // if (isDynamoDBConfig) {
-    //   return getCopilotMetricsFromDatabase(filter);
-    // }
+    if (isDynamoDBConfig) {
+      return getCopilotMetricsFromDatabase(filter);
+    }
     return getCopilotMetricsFromApi(filter);
   } catch (e) {
     return unknownResponseError(e);
