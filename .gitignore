@@ -1,2 +1,6 @@
-.azure/
-.idea/
+**/cdk.out/
+**/.cdk.staging/
+**/node_modules/
+**/cdk.context.json
+**/*.js.map
+docker/*
